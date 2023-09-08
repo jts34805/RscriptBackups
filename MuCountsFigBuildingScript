@@ -1,0 +1,190 @@
+###This script is for generating Plots from MuCountsAll, MuCountsF, MuCountsR, MuCountsTrim
+##Need to run CleandataMuCounts Script First####
+
+###highlighting Inherited Insertions (present in NA14 plants)
+plotReps = function(i) { plot(unique(MuCountsF[,i]+1, MuCountsR[,i]+1), pch = 19, log = 'xy', col = c('black','red')[1+ (rowSums(MuCountsAll[,39:41]) >= 100)]) }
+
+par(mfrow = c(2,2))
+for (i in 1:ncol(MuCountsAll[,1:4])) { plotReps(i) }
+
+
+###Making PMF####POWERLAW###
+HapCounts = NULL
+for (i in seq(5,11,2)) {
+  HapCounts = c(HapCounts, median(MuCountsTrim[(MuCountsTrim[,i] > 100) & (MuCountsTrim[,i+1] > 100),i]),
+                median(MuCountsTrim[(MuCountsTrim[,i] > 100) & (MuCountsTrim[,i+1] > 100),i+1]))
+}
+HapCounts = c(HapCounts, median(MuCountsTrim[MuCountsTrim[,1] > 500,1]))
+MuCountsHap = sweep(MuCountsTrim[,c(5:12,1)], 2, HapCounts, '/')*100
+MuCountsHap[MuCountsTrim[,1] >= 800,9] = 0
+MuCountsHap = MuCountsHap[rowSums(MuCountsHap) > 0,]
+plotPMF = function(i, thresh = 25) {
+  X = MuCountsHap[rowSums(MuCountsHap > thresh) <= 1,i]
+  X = table(X)
+  X = X[length(X):2]
+  cbind(as.numeric(names(X)),as.numeric(cumsum(X)))
+}
+par(mfrow = c(1,2))
+plot(plotPMF(1), type='l', log = 'xy', xlim = c(.01,100), ylim = c(1,30000), xaxt = 'n', xlab = 'Cell divisions since zygote', ylab = 'Insertions at or before cell division')
+axis(1, at = 100/2^(1:15), labels = 1:15)
+for (i in seq(3,9,2)) { lines(plotPMF(i)) }
+for (i in seq(2,8,2)) { lines(plotPMF(i), col = 'red') }
+
+
+plot(plotPMF(3), type='l', log = 'xy', xlim = c(.01,100), ylim = c(1,30000), xaxt = 'n', xlab = 'Cell divisions since zygote', ylab = 'Insertions at or before cell division')
+axis(1, at = 100/2^(1:15), labels = 1:15)
+lines(plotPMF(7))
+lines(plotPMF(9))
+lines(plotPMF(6), col = 'red')
+####note: Numbers should be adjusted to reflect new Mu CountsTrim (50 samples)
+
+
+#####TSD PLOT NEAREST MU##### (adjustments need to be made for new datasets (made with original 12))
+nearestMu = function(A = MoleculeCounts, mx = 12) {
+  Af = A[grepl(' 1$', rownames(A)),]
+  Ar = A[grepl(' -1$', rownames(A)),]
+  if (!is.null(dim(Af))) { Af = rowSums(Af) }
+  if (!is.null(dim(Ar))) { Ar = rowSums(Ar) }
+  names(Af) = sub(' 1$', '', names(Af))
+  names(Ar) = gsub(' -1$', '', names(Ar))
+  
+  locs = unique(c(names(Af), names(Ar)))
+  locs = data.frame(Chr = sub(' .+', '', locs), Pos = as.numeric(sub('.+ ', '', locs)))
+  locs2 = data.frame(Chr = rep(locs[,1], each = 2*mx + 1), Pos = rep(locs[,2], each = 2*mx + 1) + rep(-mx:mx))
+  locs2 = unique(locs2)
+  locs2 = locs2[order(locs2[,1],locs2[,2]),]
+  locs = paste(locs2[,1], gsub(' ', '', format(locs2[,2], scientific=F)), sep = ' ')
+  
+  Af2 = Af[locs]
+  Af2[is.na(Af2)] = 0
+  Ar2 = Ar[locs]
+  Ar2[is.na(Ar2)] = 0
+  
+  outFF = rep(0, length = 2*mx + 1)
+  outFR = outFF
+  for (i in which((Af2+Ar2) > 0)) {
+    outFF = outFF + Af2[i]*c(Af2[(i-mx):(i-1)], Af2[i] - 1, Af2[(i+1):(i+mx)]) + Ar2[i]*c(Ar2[(i+mx):(i+1)], Ar2[i] - 1, Ar2[(i-1):(i-mx)])
+    outFR = outFR + Af2[i]*Ar2[(i-mx):(i+mx)] + Ar2[i]*Af2[(i+mx):(i-mx)]
+  }
+  out = cbind(outFF, outFR)
+  out = out/(sum(Af2+Ar2)*(sum(Af2+Ar2)-1))
+  colnames(out) = c('same', 'reverse')
+  rownames(out) = -mx:mx
+  return(out)
+}
+MolCountsNoMaternal=MoleculeCounts
+MolCountsNoMaternal=as.data.frame(MolCountsNoMaternal)
+MolCountsNoMaternal$Maternal=rowSums(MolCountsNoMaternal[,2:4])
+MolCountsNoMaternal=MolCountsNoMaternal[MolCountsNoMaternal$Maternal==0,]
+MolCountsNoMaternal=MolCountsNoMaternal[,1:12]
+Mudists = nearestMu(MolCountsNoMaternal)
+barplot(t(Mudists), legend = T, col = c('#444444', '#DD1111'), border=NA, space=0, las = 1, xaxt='n', xlab = 'Distance (bp)', ylab = 'Probability')
+axis(1, at = seq(-12,12,2)+12.5, labels = seq(-12,12,2))
+####################
+
+###########MUINSERTIONHOTSPOTHISTOGRAM############
+Locs = t(matrix(unlist(strsplit(rownames(MuCountsAll), '_')),nrow=2))##Creates matrix of chromosome and position
+Locs = data.frame(Chr = factor(Locs[,1]), Pos = as.numeric(Locs[,2])) ##Makes data frame from chromosome and position 
+diffs = NULL
+for (chr in unique(Locs[,1])[1:10]) {
+  xx = Locs[Locs[,1] == chr,2]
+  diffs = c(diffs, abs(sapply(1:100000, function(i) { diff(sample(xx,2)) })))
+}
+diffs = diffs[diffs <= 10^6]
+d2 = table(diffs)
+svg()
+hist(diffs[diffs <= 4*10^3], breaks = 100, border=NA, col='#555555', xlab="Hotspot Size kb", ylab="Hotspot Intensity")  #### Fig
+dev.off()
+#######################
+
+#####UniqueMoleculesandUniqueLocationsDetectedFigs######
+#colsums for molecules counts and mucountsall should be the same
+MolCounts=MuCountsAll[,1]
+MolCounts=cbind(MolCounts, MuCountsAll[,c(5,7,9,11)])
+MolCounts=cbind(MolCounts, MuCountsAll[,c(6,8,10,12)])
+MolCounts=cbind(MolCounts, MuCountsAll[,c(2,3,4)])
+UniqMols=colSums(MolCounts)
+UniqLocs=colSums(MolCounts>0)
+
+
+svg()
+barplot(UniqMols, main="UniqueMolecules")
+abline(h=125000)
+dev.off()
+
+svg()
+barplot(UniqLocs, main="UniqueLocations")
+dev.off()
+##################
+
+#Generates forward vs reverse tir plot combining all data sets ###BETTER TO USE A SINGLE DATASET AT A TIME
+
+plot(MuCountsF, MuCountsR, log='xy')
+MuF=as.data.frame(MuCountsF)
+MuR=as.data.frame(MuCountsR)
+MuF$For=rowSums(MuF)
+MuR$Rev=rowSums(MuR)
+doubles = data.frame(MuF$For, MuR$Rev)
+colnames(doubles)=c("Forward","Reverse")
+head(doubles)
+
+Forward=as.data.frame(doubles[,1])
+Reverse=as.data.frame(doubles[,2])
+svg()
+plot(doubles[,1]+1,doubles[,2]+1, log='xy',type="p", pch=19, xaxt = 'n', yaxt='n')
+axis(1, at = c(1,2,11,101,1001,10001), labels = c(0,1,10,100,1000,10000))
+axis(2, at = c(1,2,11,101,1001,10001), labels = c(0,1,10,100,1000,10000))
+dev.off()
+#Plot above combines all datasets into one plot, might make graph innaccurate. 
+ggplot(aes(doubles[,1],doubles[,2]) +geom_point() +scale_x_continuous(trans='log10')+scale_y_continuous('log10'))
+
+##FOrward vs Reverse using Na17-22 pollen 
+PollenF=MuCountsF[,8]
+PollenR=MuCountsR[,8]
+svg()
+plot(PollenF+1,PollenR+1, log='xy', pch=19, xaxt = 'n', yaxt='n')
+axis(1, at = c(1,2,11,101,1001,10001), labels = c(0,1,10,100,1000,10000))
+axis(2, at = c(1,2,11,101,1001,10001), labels = c(0,1,10,100,1000,10000))
+dev.off()
+
+
+
+ForvsRev=ggplot(data=doubles)+aes(x=Forward+1,y=Reverse+1) +geom_point() +scale_x_continuous(trans='log10')+scale_y_continuous(trans='log10')+theme_classic()
+ForvsRev
+svg()
+ggplot(data=doubles)+aes(x=Forward+1,y=Reverse+1) +geom_point() +scale_x_continuous(trans='log10')+scale_y_continuous(trans='log10')+theme_classic()
+dev.off()
+###############################
+
+###making TargetSite Insertion Motif
+Genomesequence=import("~/Desktop/Coding/Genomes/Zm-W22-REFERENCE-NRGENE-2.0.fasta")
+Annotated=import("~/Desktop/Coding/Genomes/W22chr_scaffolds.gff3.gz")
+Insertions=MuCountsTrim
+Insertions=as.data.frame(Insertions)
+Insertions$Ancestral=rowSums(Insertions[,39:41])
+Insertions=filter(Insertions, Ancestral==0) #Removing insertions present in any mu inactive tissue
+Insertions$Presence=rowSums(Insertions[,1:50])
+Insertions=filter(Insertions, Presence>0) #Removing any rows that have no insertions
+Insertions=Insertions[,c(1,5,6,7,8,9,10,11,12)] #remove unneeded columns
+Insertions$Names=rownames(Insertions)
+Insertions$I=strsplit(Insertions$Names, "_")
+A = t(matrix(unlist(sapply(rownames(Insertions), function(xx) {
+  xx = strsplit(xx, '_')[[1]]
+  strsplit(as.character(subseq(Genomesequence[[xx[1]]], start = as.numeric(xx[2]) - 15, width = 30)), '')
+})), nrow = 30))
+B = apply(A, 2, table)
+B = sweep(B, 2, colSums(B), '/')
+svg()
+seqLogo(B[,9:23])
+dev.off
+####Making ValidationSeq Plot valseq.txt was made in the cluster
+valseq <- read.csv("~/Desktop/Coding/valseq.txt", sep="")
+V=t(matrix(unlist(strsplit(valseq[,1], '')), nrow = 20))
+V2=V[1:2500,]
+VV = apply(V2, 2, table)
+VV = sweep(VV, 2, colSums(VV), '/')
+svg()
+seqLogo(VV, ic.scale = FALSE)
+dev.off()
+
+
