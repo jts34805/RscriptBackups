@@ -1,0 +1,58 @@
+####This Script is for Generating CleanDataAll.rda to make MoleculeCounts, MuCountsAll, and MuCountsTrim
+##Also Includes further processing to match Reference Insertions
+
+
+load('CleanDataAll.rda')
+######Object is DataMerge
+
+CleanData2 = lapply(DataMerge, function(xx) { xx[xx$Reads >= mean(xx$Reads)/5,] })
+
+#ReadsPerUMI = unlist(lapply(CleanData, function(x) { mean(x[,4]) }))
+
+#Turn Clean Data into 12 datasets, each consisting of Molecule Counts per genome location (Chromosome, Position, and Direction)
+MergeFn = function(A) {
+  table(paste(A$Chromosome, A$Position, A$Direction))
+}
+MergingData=lapply(CleanData2,MergeFn)
+
+#make MoleculeCounts
+allLocations = unique(unlist(lapply(MergingData, names)))
+MoleculeCounts = matrix(unlist(lapply(MergingData, function(x) { x[allLocations] })), ncol = length(MergingData))
+rownames(MoleculeCounts) = allLocations
+colnames(MoleculeCounts) = names(MergingData)
+MoleculeCounts[is.na(MoleculeCounts)] = 0
+#Make MuCountsF, MuCountsR, MuCountsAll, MuCountsTrim
+gLocs = t(matrix(unlist(strsplit(rownames(MoleculeCounts), ' ')), nrow=3))
+gLocs = data.frame(Chr = gLocs[,1], Pos = as.numeric(gLocs[,2]) + 4*as.numeric(gLocs[,3]), Dir = gLocs[,3])
+MuCountsF = MoleculeCounts[match(unique(apply(cbind(gLocs[,1:2],'1'), 1, paste, collapse='_')), apply(gLocs, 1, paste, collapse='_')),]
+MuCountsR = MoleculeCounts[match(unique(apply(cbind(gLocs[,1:2],'-1'), 1, paste, collapse='_')), apply(gLocs, 1, paste, collapse='_')),]
+MuCountsF[is.na(MuCountsF)] = 0
+rownames(MuCountsF) = gsub(' ', '', unique(apply(gLocs[,1:2], 1, paste, collapse='_')))
+MuCountsR[is.na(MuCountsR)] = 0
+rownames(MuCountsR) = gsub(' ', '', unique(apply(gLocs[,1:2], 1, paste, collapse='_')))
+MuCountsAll = (MuCountsR + MuCountsF)
+MuCountsTrim = MuCountsAll*((MuCountsR > 0) & (MuCountsF > 0))
+#sum(rowSums(((MuCountsR > 0) & (MuCountsF > 0))[,-c(1:4)]) > 0)  # number of sites sequenced from both ends
+#sum(rowSums(((MuCountsR > 0) & (MuCountsF > 0))))   # number of sites sequenced from both ends
+#sum(rowSums(((MuCountsR > 0) & (MuCountsF > 0))[,2:4]) > 0)  # number of sites sequenced from both ends
+
+#####Removing Inherited (reference) Insertions
+#########Removing Inherited Insertions (Note: blast.out is from Brad. blast.out is in Coding folder, as well as onedrive)
+MU = read.table('~/Desktop/Coding/blast.out', sep = '\t', comment ='#')
+MU=MU[MU[,7]==1,]
+MU$ID=paste(MU[,2],MU[,9],+sign(MU[,9]-MU[,10]), sign(MU[,9]-MU[,10]), sep="_")
+MU = MU[order(MU[,2], MU[,9]),-1]
+MU$ID2 = paste(MU[,1], MU[,8] + 5*sign(MU[,8] - MU[,9]), sep = '_')
+MU2 = MU[MU[,7] >= 65,]
+MU2$Pair = NA
+PR = which(abs(diff(c(0, MU2[, 8]))) < 10000)
+MU2$Pair[PR] = MU2$ID2[PR - 1]
+# Swap out paired ends for reference annotations
+swaps = !is.na(MU2$Pair) & (MU2$ID2 %in% rownames(MuCountsF)) & (MU2$Pair %in% rownames(MuCountsF))
+MuCountsF[MU2[swaps,]$Pair,] = MuCountsF[MU2[swaps,]$ID2,]
+MuCountsR = MuCountsR[!(rownames(MuCountsR) %in% MU2[swaps,]$ID2),]
+MuCountsF = MuCountsF[!(rownames(MuCountsF) %in% MU2[swaps,]$ID2),]
+# Remove unpaired reference TIRs from MuCountsF/R
+Singles = MU$ID2[!(MU$ID2 %in% MU2$ID2[c(PR,PR-1)])]
+MuCountsR = MuCountsR[!(rownames(MuCountsR) %in% Singles),]
+MuCountsF = MuCountsF[!(rownames(MuCountsF) %in% Singles),]
