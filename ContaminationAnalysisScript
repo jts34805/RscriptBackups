@@ -1,0 +1,221 @@
+####This script is for all of the contamination analysis. 
+####Required running CleanDatatoMuCounts Script
+
+###initial Analyzing
+pairs(unique((MuCountsAll[,1:12])+1, pch = 19, cex = .5, log = 'xy')
+MuCountsAllContam=MuCountsAll[,c('M37-O','M33B',"M34-O",'M36','M36-T',"M28-O","M33-O", '29E',"S29-1C","S29-1B","M29-T","M29","S29-4C","S29-3C",'B29')]
+pairs(unique((MuCountsAllContam)+1, pch = 20, cex = .5, log = 'xy'))
+#plotting one pair
+plot(MuCountsAll[,"B29"]+1,MuCountsAll[,"S29-4C"]+1, pch=20,log='xy')
+plot(MuCountsAll[,"NA17-22POLLEN"]+1,MuCountsAll[,"NA17-23LEAF"]+1, pch=20,log='xy')
+plot(MuCountsAll[,"NA17-22POLLEN"]+1,MuCountsAll[,"NA17-24LEAF"]+1, pch=20,log='xy')
+pairs(unique(MuCountsAll))
+
+####Making Subsets### to better assess contamination
+twentynineMuCountsTrim=MuCountsTrim[,c("29E","B29","M29","M29-T", "S29-1B","S29-1C","S29-3C","S29-4C")]
+EndoMuCountsTrim=MuCountsTrim[,c("28E","29E","31E","33E","34E","36E","37E","40E")]
+OGMuCountsTrim=MuCountsTrim[,c("NA13-7-Leaf", "NA14-11LEAF", "NA14-8LEAF", "NA14-9LEAF","NA17-12LEAF","NA17-12POLLEN","NA17-22LEAF","NA17-22POLLEN","NA17-23LEAF", "NA17-23POLLEN", "NA17-24LEAF", "NA17-24POLLEN")]
+AllContaminantsMuCountsTrim=MuCountsTrim[,1:37]
+AllContaminantsMuCountsTrim=cbind(AllContaminantsMuCountsTrim, MuCountsTrim[,49])
+HighcorMuCountsTrim=MuCountsTrim[,c("B29", "29E", "S29-3C","M29","S29-1B","M29-T","S29-1C","M33-O","M28-O","M36-T","M36",'M34-O',"M33B","M37-O")]
+LeafMuCountsTrim=MuCountsTrim[,c("B28",'B29','B31','B33','B34','B36',"B37",'B40','B12')]
+one=MuCountsTrim[,1:38]
+two=MuCountsTrim[,42:50]
+ActiveOnlyMuCountsTrim=cbind(one,two)
+##Heatmaps##
+library(ComplexHeatmap)
+heatmap(cor(MuCountsTrim, method='spearman'))
+heatmap(cor(MuCountsAll))
+heatmap(cor(MuCountsTrim))
+heatmap(cor(MuCountsAll))
+heatmap(MuCountsTrim[,1:12])
+
+#normalizing and log transforming Heatmaps
+CPM=sweep(MuCountsTrim,2,colSums(MuCountsTrim), "/")*10^6
+EndoCPM=sweep(EndoMuCountsTrim,2,colSums(EndoMuCountsTrim), "/")*10^6
+AllContamCPM=sweep(AllContaminantsMuCountsTrim,2,colSums(AllContaminantsMuCountsTrim), "/")*10^6
+OGCPM=sweep(OGMuCountsTrim,2,colSums(OGMuCountsTrim), "/")*10^6
+HighcorCPM=sweep(HighcorMuCountsTrim,2,colSums(HighcorMuCountsTrim), "/")*10^6
+twentynineCPM=sweep(twentynineMuCountsTrim,2,colSums(twentynineMuCountsTrim), "/")*10^6
+Heatmap(cor(log(CPMEndo+100)))
+
+CPM=sweep(MuCountsTrim,2,colSums(MuCountsTrim), "/")*10^6
+Heatmap(cor(log(CPM+100)))
+        
+###Coloring dots differently based on conditions
+plot(CPM[,1:2]+1,pch = 19, log='xy', col = c('black','red')[1 + (CPM[,'B29'] >= 100)])
+points(CPM[CPM[,'B29'] >= 100, 1:2]+1, col ='red', pch = 19)
+
+
+###Pre or post PCR contam analysis
+##Creating Z, which is a matrix of the number of duplicated exact molecules (Post PCR contamination)
+  Z = matrix(NA, nrow = length(DataMerge), ncol = length(DataMerge))
+rownames(Z) = names(DataMerge)
+colnames(Z) = names(DataMerge)
+for (i in 1:length(DataMerge)) {
+  for (j in 1:length(DataMerge)) {
+    Z[i,j] = sum(duplicated(rbind(DataMerge[[i]],DataMerge[[j]])[,-c(3:4)]))
+    save(Z, file='tmp.rda')
+    cat('row',i,'column',j,'\n')
+  }
+}
+Z=matrix(NA,nrow=length(DataMerge), ncol=length(DataMerge))
+rownames(Z)=names(DataMerge)
+colnames(Z)=names(DataMerge)
+  for (i in 1:length(DataMerge)) {
+    for (j in 1:length(DataMerge)) {
+      if (is.na(Z[i,j])) {
+        Z[i,j] = sum(duplicated(rbind(DataMerge[[i]],DataMerge[[j]])[,-c(3:4)]))
+        save(Z, file='tmp.rda')
+        cat('row',i,'column',j,'\n')
+      }
+    }
+  }  
+  
+rownames(Z)=names(DataMerge)
+colnames(Z)=names(DataMerge)
+Heatmap(Z)
+
+
+###Contamination analysis, plotting duplicate molecules#####
+
+contamRate = function(i,j) {
+  xx = rbind(DataMerge[[i]],DataMerge[[j]])[,-4]
+  xx = xx[duplicated(xx),-c(4:5)]
+  xx = table(paste(xx$Chromosome, xx$Position, xx$Direction))
+  denom = apply(MoleculeCounts[,c(i,j)], 1, min)
+  xx2 = round(100*xx[names(denom)]/denom,2)
+  xx2[is.na(xx2)] = 0
+  names(xx2) = names(denom)
+  return(xx2)
+}
+
+plotContam = function(i,j) {
+  contamIndex = contamRate(i,j)
+  plot(unique(MoleculeCounts[,c(i,j)])+1, log = 'xy', pch = 19)
+  
+  contamIndex = cbind(MoleculeCounts[,c(i,j)]+1, contamIndex)
+  contamIndex = contamIndex[order(-contamIndex[,3]),]
+  contamIndex = contamIndex[contamIndex[,3] > 0,]
+  contamIndex = contamIndex[!duplicated(contamIndex[,1:2]),]
+  contamIndex = contamIndex[order(contamIndex[,3]),]
+  points(contamIndex[,1:2], pch = 19, col = colorRampPalette(c('black','red'))(101)[1+round(100*log(contamIndex[,3]+1,10)/log(101,10))])
+}
+
+
+svg('Contam plots.svg', width = 20, height = 20)
+
+par(mfrow = c(3,3))
+
+plotContam(13,14)
+plotContam(36,37)
+plotContam(33,35)
+plotContam(1,2)
+plotContam(36,37)
+plotContam(36,2)
+plotContam(37,2)
+plotContam(42,43)
+plotContam(33,2)
+dev.off()
+svg('EndoContam.svg', width=20, height=20)
+par(mfrow=c(3,3))
+plotContam(1,2)
+plotContam(2,3)
+plotContam(3,4)
+plotContam(4,5)
+plotContam(5,6)
+plotContam(6,7)
+plotContam(7,8)
+plotContam(2,4)
+plotContam(2,5)
+dev.off()
+svg('HighCorrelationGroup2.svg', width=20, height=20)
+par(mfrow=c(3,4))
+plotContam(3,25)
+plotContam(3,22)
+plotContam(3,27)
+plotContam(3,49)
+plotContam(3,12)
+plotContam(3,43)
+plotContam(3,29)
+plotContam(3,30)
+plotContam(3,9)
+plotContam(3,10)
+plotContam(3,4)
+plotContam(3,36)
+dev.off()
+svg('HighCorrelationGroup3.svg', width=20, height=20)
+par(mfrow=c(3,4))
+plotContam(1,25)
+plotContam(1,22)
+plotContam(1,27)
+plotContam(1,49)
+plotContam(1,12)
+plotContam(1,43)
+plotContam(1,29)
+plotContam(1,30)
+plotContam(1,9)
+plotContam(1,10)
+plotContam(1,4)
+plotContam(1,36)
+dev.off()
+###Plot al 50 against 28E
+
+svg('E31contam.svg',width=60, height=60)
+par(mfrow=c(5,4))
+plotContam(3,49)
+plotContam(3,2)
+plotContam(3,25)
+plotContam(3,26)
+plotContam(3,31)
+plotContam(3,33)
+plotContam(3,32)
+plotContam(3,45)
+plotContam(3,9)
+plotContam(3,10)
+plotContam(3,12)
+plotContam(3,13)
+plotContam(3,14)
+plotContam(3,17)
+plotContam(3,21)
+plotContam(3,23)
+plotContam(3,28)
+plotContam(3,34)
+plotContam(3,37)
+plotContam(3,38)
+dev.off()
+
+for (i in 1:length(DataMerge)) {
+  for(k in 1:length(DataMerge)){
+    xx=matrix(NA, nrow=length(DataMerge), ncol=length(DataMerge))
+    xx=rbind(DataMerge[[i]],DataMerge[[k]])
+    xx = xx[duplicated(xx),-c(4:5)]
+    xx=table(paste(xx$Chromosome, xx$Position,xx$Direction))
+    apply(MoleculeCounts[,c(i,k)],1,min)
+  }
+}
+
+#xx = rbind(DataMerge[[i]],DataMerge[[k]])[,-4]
+#xx = xx[duplicated(xx),-c(4:5)]
+#Bottom line is how to normalize 
+#(apply(MoleculeCounts[,c(i,k)],1,min))
+  
+  
+  
+####SCRATCH
+plot(unique(MoleculeCounts[,c("A10","29E")]+1),pch = 19, log='xy')
+xx=rbind(DataMerge[["A10"]],DataMerge[["29E"]])
+xx=xx[duplicated(xx), -c(4:5)]
+xx=table(paste(xx[,1],xx[,2],xx[,3]))
+xx=as.data.frame(xx)
+xxx=matrix(NA, nrow=length(xx), ncol=2)
+rownames(xxx)=xx[,1]
+
+points(MoleculeCounts[rownames(MoleculeCounts[,c("A10","29E")]) %in% xx[,1]], col ='red', pch = 19)
+
+##Brad code (making classes based on abundance), determining how common the classes are
+zz=MuCountsTrim[,c(44,47)]
+class1 = (zz[,1] > 100) & (zz[,2] > 50)
+class2 = (rowSums(zz > 0) == 2) & !class1
+sum(class2)
+sum(rowSums(zz)[class2])
